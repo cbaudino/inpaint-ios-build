@@ -1,0 +1,56 @@
+name: build-ipa
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+jobs:
+  build:
+    runs-on: macos-14
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Show toolchain
+        run: |
+          xcodebuild -version
+          xcodebuild -list -workspace Inpaint.xcworkspace || true
+
+      - name: Install CocoaPods deps
+        run: |
+          sudo gem install cocoapods --no-document || gem install cocoapods --no-document
+          pod install --repo-update
+
+      - name: Build (unsigned)
+        run: |
+          set -o pipefail
+          xcodebuild \
+            -workspace Inpaint.xcworkspace \
+            -scheme Inpaint \
+            -configuration Release \
+            -sdk iphoneos \
+            -derivedDataPath build \
+            -destination 'generic/platform=iOS' \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            PROVISIONING_PROFILE_SPECIFIER="" \
+            ONLY_ACTIVE_ARCH=NO \
+            build
+
+      - name: Package .ipa
+        run: |
+          set -e
+          APP=$(find build/Build/Products/Release-iphoneos -maxdepth 1 -name "*.app" | head -1)
+          echo "APP=$APP"
+          test -n "$APP"
+          mkdir -p Payload
+          cp -R "$APP" Payload/
+          rm -rf Payload/*.app/_CodeSignature Payload/*.app/embedded.mobileprovision || true
+          zip -qry Inpaint-unsigned.ipa Payload
+          ls -lh Inpaint-unsigned.ipa
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Inpaint-unsigned-ipa
+          path: Inpaint-unsigned.ipa
+          retention-days: 3
